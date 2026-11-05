@@ -2,6 +2,24 @@
 #include <algorithm>
 #include "PluginEditor.h"
 
+namespace
+{
+    const char* kCvDestIds[] = {
+        "None", "Tuning", "Cut Off", "Resonance", "Env Mod", "Decay", "Accent", "Volume",
+        "Sync", "VCO FM", "VCF FM", "FM Env", "FM Decay", "Wavefold", "Glide"
+    };
+    constexpr int kNumCvDests = 15;
+}
+
+const juce::StringArray& Lunchbox303AudioProcessor::cvDestChoices()
+{
+    static juce::StringArray choices;
+    if (choices.isEmpty())
+        for (int i = 0; i < kNumCvDests; ++i)
+            choices.add (kCvDestIds[i]);
+    return choices;
+}
+
 Lunchbox303AudioProcessor::Lunchbox303AudioProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "PARAMS", createParameterLayout())
@@ -20,6 +38,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout Lunchbox303AudioProcessor::c
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("decay", "DECAY", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("accent", "ACCENT", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.55f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("volume", "VOLUME", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.7f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("wavefold", "WAVEFOLD", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("glide", "GLIDE", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
     params.push_back (std::make_unique<juce::AudioParameterChoice> ("modwave", "OSC2 WAVE", juce::StringArray { "SINE", "TRI" }, 0));
     params.push_back (std::make_unique<juce::AudioParameterChoice> ("modoct", "OSC2 OCTAVE", juce::StringArray { "-2", "-1", "0", "+1", "+2" }, 2));
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("sync", "SYNC", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
@@ -30,6 +50,28 @@ juce::AudioProcessorValueTreeState::ParameterLayout Lunchbox303AudioProcessor::c
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("tempo", "BPM", juce::NormalisableRange<float> (40.0f, 300.0f, 0.1f), 130.0f));
     params.push_back (std::make_unique<juce::AudioParameterBool> ("seqon", "SEQ", false));
     params.push_back (std::make_unique<juce::AudioParameterBool> ("hostsync", "HOST SYNC", false));
+
+    // CV stepper
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("cv1", "CV 1", juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("cv2", "CV 2", juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("cv3", "CV 3", juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("cv4", "CV 4", juce::NormalisableRange<float> (-1.0f, 1.0f, 0.001f), 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("cvlag", "CV LAG", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterBool> ("cvon", "CV", true));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> (
+        "cvdiv", "CV DIV",
+        juce::StringArray { "1/32", "1/16T", "1/16", "1/8T", "1/8", "1/4T", "1/4", "1/2", "1/1" },
+        2)); // default 1/16
+
+    auto& dests = cvDestChoices();
+    for (int i = 1; i <= 4; ++i)
+    {
+        const auto n = juce::String (i);
+        params.push_back (std::make_unique<juce::AudioParameterChoice> ("cvdest" + n, "CV DEST " + n, dests, 0));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> ("cvmin" + n, "CV MIN " + n, juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+        params.push_back (std::make_unique<juce::AudioParameterFloat> ("cvmax" + n, "CV MAX " + n, juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 1.0f));
+    }
+
     return { params.begin(), params.end() };
 }
 
@@ -37,6 +79,7 @@ void Lunchbox303AudioProcessor::prepareToPlay (double sampleRate, int)
 {
     voice.prepare (sampleRate);
     sequencer.prepare (sampleRate);
+    cvStepper.prepare (sampleRate);
 }
 
 bool Lunchbox303AudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -58,6 +101,8 @@ void Lunchbox303AudioProcessor::applyParamsToVoice()
     voice.setDecay (apvts.getRawParameterValue ("decay")->load());
     voice.setAccentAmt (apvts.getRawParameterValue ("accent")->load());
     voice.setVolume (apvts.getRawParameterValue ("volume")->load());
+    voice.setWavefold (apvts.getRawParameterValue ("wavefold")->load());
+    voice.setGlide (apvts.getRawParameterValue ("glide")->load());
     voice.setModWaveTriangle ((int) apvts.getRawParameterValue ("modwave")->load() == 1);
     voice.setModOctave ((int) apvts.getRawParameterValue ("modoct")->load() - 2);
     voice.setModSync (apvts.getRawParameterValue ("sync")->load());
@@ -67,20 +112,60 @@ void Lunchbox303AudioProcessor::applyParamsToVoice()
     voice.setFmDecay (apvts.getRawParameterValue ("fmdecay")->load());
 
     const bool hostSync = apvts.getRawParameterValue ("hostsync")->load() > 0.5f;
+    double bpm = apvts.getRawParameterValue ("tempo")->load();
     if (hostSync)
     {
         if (auto* playHead = getPlayHead())
         {
             if (auto pos = playHead->getPosition())
             {
-                if (auto bpm = pos->getBpm())
-                    sequencer.setTempo (*bpm);
+                if (auto b = pos->getBpm())
+                    bpm = *b;
             }
         }
     }
-    else
+    sequencer.setTempo (bpm);
+    cvStepper.setTempo (bpm);
+
+    cvStepper.setStepValue (0, apvts.getRawParameterValue ("cv1")->load());
+    cvStepper.setStepValue (1, apvts.getRawParameterValue ("cv2")->load());
+    cvStepper.setStepValue (2, apvts.getRawParameterValue ("cv3")->load());
+    cvStepper.setStepValue (3, apvts.getRawParameterValue ("cv4")->load());
+    cvStepper.setLag (apvts.getRawParameterValue ("cvlag")->load());
+    cvStepper.setDivision ((int) apvts.getRawParameterValue ("cvdiv")->load());
+}
+
+void Lunchbox303AudioProcessor::applyCvOverrides (float smoothedCv)
+{
+    // Dest index: 0=None .. 13=Wavefold, 14=Glide
+    for (int slot = 1; slot <= 4; ++slot)
     {
-        sequencer.setTempo (apvts.getRawParameterValue ("tempo")->load());
+        const auto n = juce::String (slot);
+        const int dest = (int) apvts.getRawParameterValue ("cvdest" + n)->load();
+        if (dest <= 0) continue;
+
+        const float mn = apvts.getRawParameterValue ("cvmin" + n)->load();
+        const float mx = apvts.getRawParameterValue ("cvmax" + n)->load();
+        const float v = juce::jmap (smoothedCv, -1.0f, 1.0f, mn, mx); // 0..1 of param range (or inverted)
+
+        switch (dest)
+        {
+            case 1: voice.setTuningSemitones (juce::jmap (v, 0.0f, 1.0f, -4.0f, 4.0f)); break;
+            case 2: voice.setCutoff (v); break;
+            case 3: voice.setResonance (v); break;
+            case 4: voice.setEnvMod (v); break;
+            case 5: voice.setDecay (v); break;
+            case 6: voice.setAccentAmt (v); break;
+            case 7: voice.setVolume (v); break;
+            case 8: voice.setModSync (v); break;
+            case 9: voice.setFmVco (v); break;
+            case 10: voice.setFmVcf (v); break;
+            case 11: voice.setFmEnvAmt (v); break;
+            case 12: voice.setFmDecay (v); break;
+            case 13: voice.setWavefold (v); break;
+            case 14: voice.setGlide (v); break;
+            default: break;
+        }
     }
 }
 
@@ -92,18 +177,22 @@ void Lunchbox303AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
 
     const bool seqOn = apvts.getRawParameterValue ("seqon")->load() > 0.5f;
     const bool hostSync = apvts.getRawParameterValue ("hostsync")->load() > 0.5f;
+    const bool cvOn = apvts.getRawParameterValue ("cvon")->load() > 0.5f;
 
+    bool playing = true;
     if (hostSync)
     {
-        bool playing = false;
+        playing = false;
         if (auto* playHead = getPlayHead())
             if (auto pos = playHead->getPosition())
                 playing = pos->getIsPlaying();
         sequencer.setRunning (seqOn && playing);
+        cvStepper.setRunning (cvOn && playing);
     }
     else
     {
         sequencer.setRunning (seqOn);
+        cvStepper.setRunning (cvOn);
     }
 
     auto* left = buffer.getWritePointer (0);
@@ -178,6 +267,9 @@ void Lunchbox303AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
             }
         }
 
+        cvStepper.advance();
+        applyCvOverrides (cvStepper.getSmoothed());
+
         const float s = voice.process();
         left[i] = s;
         if (right) right[i] = s;
@@ -213,12 +305,19 @@ void Lunchbox303AudioProcessor::applyPreset (const SynthParams& p)
     set ("decay", p.decay);
     set ("accent", p.accent);
     set ("volume", p.volume);
+    set ("wavefold", p.wavefold);
+    set ("glide", p.glide);
     set ("tempo", p.tempo);
     set ("sync", p.sync);
     set ("fmvco", p.fmVco);
     set ("fmvcf", p.fmVcf);
     set ("fmenv", p.fmEnv);
     set ("fmdecay", p.fmDecay);
+    set ("cv1", p.cv1);
+    set ("cv2", p.cv2);
+    set ("cv3", p.cv3);
+    set ("cv4", p.cv4);
+    set ("cvlag", p.cvlag);
     if (auto* mw = apvts.getParameter ("modwave")) { mw->beginChangeGesture(); mw->setValueNotifyingHost (p.modWave); mw->endChangeGesture(); }
     if (auto* mo = apvts.getParameter ("modoct"))  { mo->beginChangeGesture(); mo->setValueNotifyingHost (p.modOct / 4.0f); mo->endChangeGesture(); }
     if (auto* s = apvts.getParameter ("seqon"))
@@ -226,6 +325,33 @@ void Lunchbox303AudioProcessor::applyPreset (const SynthParams& p)
         s->beginChangeGesture();
         s->setValueNotifyingHost (p.seqOn > 0.5f ? 1.0f : 0.0f);
         s->endChangeGesture();
+    }
+    if (auto* c = apvts.getParameter ("cvon"))
+    {
+        c->beginChangeGesture();
+        c->setValueNotifyingHost (p.cvon > 0.5f ? 1.0f : 0.0f);
+        c->endChangeGesture();
+    }
+    if (auto* d = apvts.getParameter ("cvdiv"))
+    {
+        d->beginChangeGesture();
+        d->setValueNotifyingHost (p.cvdiv / 8.0f);
+        d->endChangeGesture();
+    }
+    for (int i = 1; i <= 4; ++i)
+    {
+        const auto n = juce::String (i);
+        const float dests[] = { p.cvdest1, p.cvdest2, p.cvdest3, p.cvdest4 };
+        const float mins[] = { p.cvmin1, p.cvmin2, p.cvmin3, p.cvmin4 };
+        const float maxs[] = { p.cvmax1, p.cvmax2, p.cvmax3, p.cvmax4 };
+        if (auto* d = apvts.getParameter ("cvdest" + n))
+        {
+            d->beginChangeGesture();
+            d->setValueNotifyingHost (dests[i - 1] / (float) (kNumCvDests - 1));
+            d->endChangeGesture();
+        }
+        set (("cvmin" + n).toRawUTF8(), mins[i - 1]);
+        set (("cvmax" + n).toRawUTF8(), maxs[i - 1]);
     }
 }
 

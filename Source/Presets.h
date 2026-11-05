@@ -24,6 +24,17 @@ struct SynthParams
     float fmVcf { 0.0f };
     float fmEnv { 0.0f };
     float fmDecay { 0.3f };
+    float wavefold { 0.0f };
+    float glide { 0.3f };
+    // CV stepper
+    float cv1 { 0 }, cv2 { 0 }, cv3 { 0 }, cv4 { 0 };
+    float cvlag { 0 };
+    float cvon { 1.0f };
+    float cvdiv { 2.0f }; // choice index: 2 = 1/16
+    // dest indices: 0=None ... (see processor choice list)
+    float cvdest1 { 0 }, cvdest2 { 0 }, cvdest3 { 0 }, cvdest4 { 0 };
+    float cvmin1 { 0 }, cvmin2 { 0 }, cvmin3 { 0 }, cvmin4 { 0 };
+    float cvmax1 { 1 }, cvmax2 { 1 }, cvmax3 { 1 }, cvmax4 { 1 };
 };
 
 struct FactoryPreset

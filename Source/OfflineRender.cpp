@@ -58,6 +58,8 @@ int main (int argc, char** argv)
     voice.setFmVcf (preset.params.fmVcf);
     voice.setFmEnvAmt (preset.params.fmEnv);
     voice.setFmDecay (preset.params.fmDecay);
+    voice.setWavefold (preset.params.wavefold);
+    voice.setGlide (preset.params.glide);
     seq.setTempo (preset.params.tempo);
     seq.setRunning (true);
 

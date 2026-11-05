@@ -3,6 +3,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "VoiceEngine.h"
 #include "Sequencer.h"
+#include "CvStepper.h"
 #include "Presets.h"
 
 class Lunchbox303AudioProcessor : public juce::AudioProcessor
@@ -36,15 +37,19 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
     Sequencer& getSequencer() noexcept { return sequencer; }
+    CvStepper& getCvStepper() noexcept { return cvStepper; }
 
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+    static const juce::StringArray& cvDestChoices();
 
 private:
     void applyParamsToVoice();
+    void applyCvOverrides (float smoothedCv);
     void applyPreset (const SynthParams& p);
 
     VoiceEngine voice;
     Sequencer sequencer;
+    CvStepper cvStepper;
     int currentProgram { 0 };
     std::vector<int> heldNotes;
     bool midiHeld { false };

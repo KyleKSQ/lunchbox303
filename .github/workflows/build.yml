@@ -8,7 +8,7 @@ on:
 jobs:
   macos:
     name: macOS universal (VST3 + AU)
-    runs-on: macos-13
+    runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
 
@@ -30,7 +30,6 @@ jobs:
       - name: Stage plugins
         run: |
           mkdir -p dist
-          # Flatten: put the .vst3 / .component bundles at the artifact root
           find build -type d -name "*.vst3" | while read d; do
             name=$(basename "$d")
             rm -rf "dist/$name"
@@ -41,7 +40,6 @@ jobs:
             rm -rf "dist/$name"
             cp -R "$d" "dist/$name"
           done
-          # Prefer the KLSTRFK-named product if present
           ls -la dist
           find dist -maxdepth 2 -type d
           du -sh dist/*
@@ -52,9 +50,3 @@ jobs:
           name: Lunchbox303-macOS-universal
           path: |
             dist/
-
-  ubuntu-diag:
-    name: Linux diag
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo "actions alive" && uname -a

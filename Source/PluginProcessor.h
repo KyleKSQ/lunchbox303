@@ -1,4 +1,5 @@
 #pragma once
+#include <vector>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include "VoiceEngine.h"
 #include "Sequencer.h"
@@ -45,6 +46,7 @@ private:
     VoiceEngine voice;
     Sequencer sequencer;
     int currentProgram { 0 };
+    std::vector<int> heldNotes;
     bool midiHeld { false };
     int midiNote { -1 };
     bool seqGateOpen { false };

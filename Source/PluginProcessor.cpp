@@ -21,7 +21,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout Lunchbox303AudioProcessor::c
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("accent", "ACCENT", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.55f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("volume", "VOLUME", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.7f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("tempo", "BPM", juce::NormalisableRange<float> (40.0f, 300.0f, 0.1f), 130.0f));
-    params.push_back (std::make_unique<juce::AudioParameterBool> ("seqon", "SEQ", true));
+    params.push_back (std::make_unique<juce::AudioParameterBool> ("seqon", "SEQ", false));
     params.push_back (std::make_unique<juce::AudioParameterBool> ("hostsync", "HOST SYNC", false));
     return { params.begin(), params.end() };
 }
@@ -92,32 +92,60 @@ void Lunchbox303AudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, 
         sequencer.setRunning (seqOn);
     }
 
-    // MIDI note input
-    for (const auto metadata : midi)
-    {
-        const auto msg = metadata.getMessage();
-        if (msg.isNoteOn())
-        {
-            midiHeld = true;
-            midiNote = msg.getNoteNumber();
-            voice.noteOn (midiNote, false, false);
-            sequencer.setRunning (false);
-        }
-        else if (msg.isNoteOff() && msg.getNoteNumber() == midiNote)
-        {
-            midiHeld = false;
-            midiNote = -1;
-            voice.noteOff();
-        }
-    }
-
     auto* left = buffer.getWritePointer (0);
     auto* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr;
     const int n = buffer.getNumSamples();
     const int halfGate = std::max (1, sequencer.samplesPerStep() / 2);
 
+    auto handleMidi = [this] (const juce::MidiMessage& msg)
+    {
+        if (msg.isNoteOn())
+        {
+            const int note = msg.getNoteNumber();
+            heldNotes.erase (std::remove (heldNotes.begin(), heldNotes.end(), note), heldNotes.end());
+            const bool legato = ! heldNotes.empty();
+            heldNotes.push_back (note);
+            midiHeld = true;
+            midiNote = note;
+            voice.noteOn (note, msg.getVelocity() >= 100, legato);
+        }
+        else if (msg.isNoteOff())
+        {
+            heldNotes.erase (std::remove (heldNotes.begin(), heldNotes.end(), msg.getNoteNumber()), heldNotes.end());
+            if (heldNotes.empty())
+            {
+                midiHeld = false;
+                midiNote = -1;
+                voice.noteOff();
+            }
+            else if (midiNote == msg.getNoteNumber())
+            {
+                midiNote = heldNotes.back();
+                voice.noteOn (midiNote, false, true);
+            }
+        }
+        else if (msg.isPitchWheel())
+        {
+            voice.setBendSemitones (((float) msg.getPitchWheelValue() - 8192.0f) / 8192.0f * 2.0f);
+        }
+        else if (msg.isAllNotesOff() || msg.isAllSoundOff())
+        {
+            heldNotes.clear();
+            midiHeld = false;
+            midiNote = -1;
+            voice.noteOff();
+        }
+    };
+
+    auto it = midi.begin();
     for (int i = 0; i < n; ++i)
     {
+        while (it != midi.end() && (*it).samplePosition <= i)
+        {
+            handleMidi ((*it).getMessage());
+            ++it;
+        }
+
         if (! midiHeld && seqOn)
         {
             const int intoBefore = sequencer.getSamplesIntoStep();

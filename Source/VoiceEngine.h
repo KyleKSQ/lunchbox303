@@ -36,9 +36,20 @@ public:
     void setAccentAmt (float a01) noexcept { accentAmt = std::clamp (a01, 0.0f, 1.0f); }
     void setVolume (float v01) noexcept { volume = std::clamp (v01, 0.0f, 1.0f); }
 
+    void setBendSemitones (float b) noexcept
+    {
+        bendSemis = b;
+        if (curNote >= 0)
+        {
+            targetHz = 440.0 * std::pow (2.0, ((double) curNote - 69.0 + tuningSemis + bendSemis) / 12.0);
+            if (slideRemain == 0) currentHz = targetHz;
+        }
+    }
+
     void noteOn (int midiNote, bool accent, bool slide) noexcept
     {
-        const float semis = (float) midiNote - 69.0f + tuningSemis;
+        curNote = midiNote;
+        const float semis = (float) midiNote - 69.0f + tuningSemis + bendSemis;
         targetHz = 440.0 * std::pow (2.0, semis / 12.0);
 
         if (slide && gateOn)
@@ -165,6 +176,8 @@ private:
     double phase { 0.0 };
     double currentHz { 110.0 }, targetHz { 110.0 }, slideStartHz { 110.0 };
     float ampEnv { 0 }, filtEnv { 0 };
+    int curNote { -1 };
+    float bendSemis { 0 };
     float tuningSemis { 0 }, cutoff { 0.4f }, reso { 0.4f }, envMod { 0.6f };
     float decay { 0.4f }, accentAmt { 0.5f }, volume { 0.7f };
     bool usePulse { false }, gateOn { false }, accented { false };

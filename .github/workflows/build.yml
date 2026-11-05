@@ -30,17 +30,25 @@ jobs:
       - name: Stage plugins
         run: |
           mkdir -p dist
-          # JUCE places artifacts under build/Lunchbox303_artefacts
-          find build -type d -name "*.vst3" | while read d; do cp -R "$d" dist/; done
-          find build -type d -name "*.component" | while read d; do cp -R "$d" dist/; done
-          find build -name "Lunchbox303" -type f -perm -111 | head -5
-          cp -f sample_pattern.wav dist/ 2>/dev/null || true
-          ls -laR dist
+          # Flatten: put the .vst3 / .component bundles at the artifact root
+          find build -type d -name "*.vst3" | while read d; do
+            name=$(basename "$d")
+            rm -rf "dist/$name"
+            cp -R "$d" "dist/$name"
+          done
+          find build -type d -name "*.component" | while read d; do
+            name=$(basename "$d")
+            rm -rf "dist/$name"
+            cp -R "$d" "dist/$name"
+          done
+          # Prefer the KLSTRFK-named product if present
+          ls -la dist
+          find dist -maxdepth 2 -type d
+          du -sh dist/*
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v4
         with:
           name: Lunchbox303-macOS-universal
           path: |
-            dist/**
-            sample_pattern.wav
+            dist/

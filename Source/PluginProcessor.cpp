@@ -20,6 +20,13 @@ juce::AudioProcessorValueTreeState::ParameterLayout Lunchbox303AudioProcessor::c
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("decay", "DECAY", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.4f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("accent", "ACCENT", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.55f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("volume", "VOLUME", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.7f));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> ("modwave", "OSC2 WAVE", juce::StringArray { "SINE", "TRI" }, 0));
+    params.push_back (std::make_unique<juce::AudioParameterChoice> ("modoct", "OSC2 OCTAVE", juce::StringArray { "-2", "-1", "0", "+1", "+2" }, 2));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("sync", "SYNC", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("fmvco", "VCO FM", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("fmvcf", "VCF FM", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("fmenv", "FM ENV", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.0f));
+    params.push_back (std::make_unique<juce::AudioParameterFloat> ("fmdecay", "FM DECAY", juce::NormalisableRange<float> (0.0f, 1.0f, 0.001f), 0.3f));
     params.push_back (std::make_unique<juce::AudioParameterFloat> ("tempo", "BPM", juce::NormalisableRange<float> (40.0f, 300.0f, 0.1f), 130.0f));
     params.push_back (std::make_unique<juce::AudioParameterBool> ("seqon", "SEQ", false));
     params.push_back (std::make_unique<juce::AudioParameterBool> ("hostsync", "HOST SYNC", false));
@@ -51,6 +58,13 @@ void Lunchbox303AudioProcessor::applyParamsToVoice()
     voice.setDecay (apvts.getRawParameterValue ("decay")->load());
     voice.setAccentAmt (apvts.getRawParameterValue ("accent")->load());
     voice.setVolume (apvts.getRawParameterValue ("volume")->load());
+    voice.setModWaveTriangle ((int) apvts.getRawParameterValue ("modwave")->load() == 1);
+    voice.setModOctave ((int) apvts.getRawParameterValue ("modoct")->load() - 2);
+    voice.setModSync (apvts.getRawParameterValue ("sync")->load());
+    voice.setFmVco (apvts.getRawParameterValue ("fmvco")->load());
+    voice.setFmVcf (apvts.getRawParameterValue ("fmvcf")->load());
+    voice.setFmEnvAmt (apvts.getRawParameterValue ("fmenv")->load());
+    voice.setFmDecay (apvts.getRawParameterValue ("fmdecay")->load());
 
     const bool hostSync = apvts.getRawParameterValue ("hostsync")->load() > 0.5f;
     if (hostSync)
@@ -200,6 +214,13 @@ void Lunchbox303AudioProcessor::applyPreset (const SynthParams& p)
     set ("accent", p.accent);
     set ("volume", p.volume);
     set ("tempo", p.tempo);
+    set ("sync", p.sync);
+    set ("fmvco", p.fmVco);
+    set ("fmvcf", p.fmVcf);
+    set ("fmenv", p.fmEnv);
+    set ("fmdecay", p.fmDecay);
+    if (auto* mw = apvts.getParameter ("modwave")) { mw->beginChangeGesture(); mw->setValueNotifyingHost (p.modWave); mw->endChangeGesture(); }
+    if (auto* mo = apvts.getParameter ("modoct"))  { mo->beginChangeGesture(); mo->setValueNotifyingHost (p.modOct / 4.0f); mo->endChangeGesture(); }
     if (auto* s = apvts.getParameter ("seqon"))
     {
         s->beginChangeGesture();

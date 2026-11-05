@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <vector>
+#include <cstdlib>
 #include <string>
 #include <cmath>
 
@@ -36,7 +37,7 @@ int main (int argc, char** argv)
 {
     const char* out = argc > 1 ? argv[1] : "/workspace/lunchbox303/sample_pattern.wav";
     const double sr = 44100.0;
-    const auto& preset = getFactoryPresets()[1]; // me acid 1
+    const auto& preset = getFactoryPresets()[argc > 2 ? std::atoi (argv[2]) : 1];
 
     VoiceEngine voice;
     Sequencer seq;
@@ -50,6 +51,13 @@ int main (int argc, char** argv)
     voice.setDecay (preset.params.decay);
     voice.setAccentAmt (preset.params.accent);
     voice.setVolume (preset.params.volume);
+    voice.setModWaveTriangle (preset.params.modWave > 0.5f);
+    voice.setModOctave ((int) preset.params.modOct - 2);
+    voice.setModSync (preset.params.sync);
+    voice.setFmVco (preset.params.fmVco);
+    voice.setFmVcf (preset.params.fmVcf);
+    voice.setFmEnvAmt (preset.params.fmEnv);
+    voice.setFmDecay (preset.params.fmDecay);
     seq.setTempo (preset.params.tempo);
     seq.setRunning (true);
 

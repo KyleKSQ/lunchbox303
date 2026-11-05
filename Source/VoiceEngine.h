@@ -18,6 +18,8 @@ public:
     void reset() noexcept
     {
         phase = 0.0;
+        phase2 = 0.0;
+        fmEnv = 0.0f;
         ampEnv = 0.0;
         filtEnv = 0.0;
         currentHz = targetHz = 110.0;
@@ -35,6 +37,15 @@ public:
     void setDecay (float d01) noexcept { decay = std::clamp (d01, 0.0f, 1.0f); }
     void setAccentAmt (float a01) noexcept { accentAmt = std::clamp (a01, 0.0f, 1.0f); }
     void setVolume (float v01) noexcept { volume = std::clamp (v01, 0.0f, 1.0f); }
+
+    // Modulator oscillator (Osc 2): never reaches the audio output
+    void setModWaveTriangle (bool tri) noexcept { modTri = tri; }
+    void setModOctave (int oct) noexcept { modOct = std::clamp (oct, -2, 2); }
+    void setModSync (float s01) noexcept { modSync = std::clamp (s01, 0.0f, 1.0f); }
+    void setFmVco (float f01) noexcept { fmVco = std::clamp (f01, 0.0f, 1.0f); }
+    void setFmVcf (float f01) noexcept { fmVcf = std::clamp (f01, 0.0f, 1.0f); }
+    void setFmEnvAmt (float a01) noexcept { fmEnvAmt = std::clamp (a01, 0.0f, 1.0f); }
+    void setFmDecay (float d01) noexcept { fmDecay = std::clamp (d01, 0.0f, 1.0f); }
 
     void setBendSemitones (float b) noexcept
     {
@@ -71,6 +82,7 @@ public:
         const float a = accent ? accentAmt : 0.0f;
         ampEnv = 0.85f + 0.35f * a;
         filtEnv = 1.0f;
+        fmEnv = 1.0f; // FM envelope retriggers on every note
         clickRemain = accent ? (int) (0.003 * sampleRate) : 0; // short click
     }
 
@@ -111,12 +123,36 @@ public:
         }
         filtEnv *= fltDec;
 
-        // Oscillator (polyBLEP saw / square)
+        // FM envelope (exponential decay, 15 ms .. 1.5 s), accent adds a bit of depth
+        const float fmDecSec = 0.015f + fmDecay * fmDecay * 1.5f;
+        fmEnv *= (float) std::exp (-1.0 / (fmDecSec * sampleRate));
+        const float accBoost = accented ? (1.0f + 0.5f * accentAmt) : 1.0f;
+        const float envPart = fmEnvAmt * fmEnv * accBoost;
+        const float depthVco = std::min (2.0f, fmVco * 1.0f + envPart * 1.0f);
+        const float depthVcf = std::min (2.0f, fmVcf * 1.0f + envPart * 1.0f);
+
+        // Modulator oscillator: locked to the played pitch (incl. slide and bend), octave offset
         const double freq = std::clamp (currentHz, 20.0, sampleRate * 0.45);
-        const double dt = freq / sampleRate;
+        const double freq2 = std::clamp (freq * std::pow (2.0, (double) modOct), 5.0, sampleRate * 0.25);
+        const double dt2 = freq2 / sampleRate;
+        float mod = 0.0f;
+        if (modTri) mod = (float) (1.0 - 4.0 * std::fabs (phase2 - 0.5));
+        else        mod = (float) std::sin (6.283185307179586 * phase2);
+        phase2 += dt2;
+        if (phase2 >= 1.0) phase2 -= 1.0;
+
+        // Main oscillator (polyBLEP saw / square) with linear VCO FM from the modulator
+        const double fmScale = 1.0 + (double) (depthVco * mod);
+        const double freqFm = std::clamp (freq * std::max (0.02, fmScale), 5.0, sampleRate * 0.45);
+        const double dt = freqFm / sampleRate;
         float osc = usePulse ? polyBlepSquare (phase, dt) : polyBlepSaw (phase, dt);
         phase += dt;
-        if (phase >= 1.0) phase -= 1.0;
+        if (phase >= 1.0)
+        {
+            phase -= 1.0;
+            // Hard sync: restart the modulator when the main oscillator wraps (blend by Sync amount)
+            phase2 *= (1.0 - (double) modSync);
+        }
 
         if (clickRemain > 0)
         {
@@ -126,9 +162,11 @@ public:
 
         // Filter cutoff mapping
         const float base = 40.0f * std::pow (2.0f, cutoff * 9.0f); // ~40 Hz .. ~20 kHz
-        const float mod = filtEnv * envMod * (3500.0f + 2500.0f * (accented ? accentAmt : 0.0f));
+        const float modEnv = filtEnv * envMod * (3500.0f + 2500.0f * (accented ? accentAmt : 0.0f));
         const float accentOpen = accented ? (800.0f * accentAmt * filtEnv) : 0.0f;
-        filter.setCutoffHz ((double) (base + mod + accentOpen));
+        // VCF FM: modulator moves the cutoff up to +/-3 octaves at full depth
+        const float vcfFm = std::pow (2.0f, 3.0f * depthVcf * mod);
+        filter.setCutoffHz ((double) ((base + modEnv + accentOpen) * vcfFm));
         filter.setResonance ((double) (0.05f + reso * 0.92f));
 
         float y = filter.process (osc * 1.4f);
@@ -173,7 +211,10 @@ private:
     }
 
     double sampleRate { 44100.0 };
-    double phase { 0.0 };
+    double phase { 0.0 }, phase2 { 0.0 };
+    float fmEnv { 0 }, fmVco { 0 }, fmVcf { 0 }, fmEnvAmt { 0 }, fmDecay { 0.3f }, modSync { 0 };
+    int modOct { 0 };
+    bool modTri { false };
     double currentHz { 110.0 }, targetHz { 110.0 }, slideStartHz { 110.0 };
     float ampEnv { 0 }, filtEnv { 0 };
     int curNote { -1 };
